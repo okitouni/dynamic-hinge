@@ -10,18 +10,18 @@ from monotonenorm import direct_norm, GroupSort
 from losses import DynamicHingeLoss
 
 def accuracy(y_pred, y_true):
-    return (torch.sign(y_pred) == y_true).sum().item() / y_pred.shape[0]
+    return ((y_pred > .5) == y_true).sum().item() / y_pred.shape[0]
 
 torch.manual_seed(0)
 EPOCHS = 1000
-npoints = 100
+npoints = 10000
 PLOT = True
 
-dist1 = torch.distributions.Normal(0.5, 1)
-dist2 = torch.distributions.Normal(-0.5, 0.9)
+dist1 = torch.distributions.Normal(-1, 1)
+dist2 = torch.distributions.Normal(1, 1)
 
 X = torch.cat((dist1.sample((npoints//2, 1)), dist2.sample((npoints//2, 1))))
-Y = torch.cat((torch.ones(npoints//2, 1), -torch.ones(npoints//2, 1)))
+Y = torch.cat((torch.ones(npoints//2, 1), torch.zeros(npoints//2, 1)))
 
 X, argsort = X.sort(0)
 Y = Y[argsort.view(-1)]
@@ -29,11 +29,18 @@ Y = Y[argsort.view(-1)]
 # likelihood ratio
 llhood = torch.exp(dist1.log_prob(X) - dist2.log_prob(X))
 # bayes optimal classifier
-llhood = 2 * (llhood / (llhood + 1) )- 1
+llhood = llhood / (llhood + 1)
 # best classifier accuracy
 
 print("Optimal Bayes Accuracy:", accuracy(llhood, Y))
 hidden_dim = 8
+
+class Multiply(nn.Module):
+    def __init__(self, factor):
+        super().__init__()
+        self.factor = factor
+    def forward(self, x):
+        return x * self.factor
 
 norm = lambda x, *args, **kwargs: x
 # norm = lambda x, *args, **kwargs: direct_norm(x, *args, **kwargs)
@@ -43,16 +50,17 @@ model = nn.Sequential(
     norm(nn.Linear(hidden_dim, hidden_dim), kind="inf"),
     GroupSort(hidden_dim//2),
     norm(nn.Linear(hidden_dim, 1), kind="inf"),
+    Multiply(10),
     nn.Sigmoid(),
 )
 
 
-criterion = lambda pred, target : nn.functional.binary_cross_entropy(pred, (target+1)/2)
-# criterion = DynamicHingeLoss(margin=1, x=X, y_true=Y, reduction='mean') 
+criterion = nn.functional.binary_cross_entropy
+# criterion = DynamicHingeLoss(margin=1, x=X, y_true=Y, reduction='mean')
 # criterion = nn.SoftMarginLoss()
-# criterion =  
+# criterion =
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
 
 pbar = tqdm.tqdm(range(EPOCHS))
 for i in pbar:
@@ -74,8 +82,8 @@ if PLOT:
     # likelihood ratio
     llhood = torch.exp(dist1.log_prob(xrange) - dist2.log_prob(xrange))
     # Optimal bayes classifier
-    llhood = 2 * llhood / (llhood + 1) - 1
-    
+    llhood = llhood / (llhood + 1)
+
     plt.scatter(X, Y)
     plt.plot(xrange, llhood, label="OptimalBayes",)
     plt.plot(xrange, yrange, label="NN")

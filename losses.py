@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-def kr_loss(y_true, y_pred, reduction='mean'):
+def kr_loss(y_pred, y_true, reduction='mean'):
     # assumes y_true is in {0, 1}^n
     sign = 2 * y_true - 1
     # this is the same as torch.mean(y_pred[y_true == 1]) - torch.mean(y_pred[y_true == 0])
@@ -10,7 +10,7 @@ def kr_loss(y_true, y_pred, reduction='mean'):
     return reduce_loss(y_pred * sign, reduction=reduction)
 
 
-def hinge_loss(y_true, y_pred, margin=1.0, reduction='mean'):
+def hinge_loss(y_pred, y_true, margin=1.0, reduction='mean'):
     # assumes y_true is in {0, 1}^n
     sign = 2 * y_true - 1
     # suppose target = [0, 0, 1]
@@ -19,11 +19,11 @@ def hinge_loss(y_true, y_pred, margin=1.0, reduction='mean'):
     # [0.5, 0.6, 0.1] -> margin
     # [0.5, 0.5, 1] -> dist of x to each class -> margins preds should be -0.5 0.5 , -1 but can also get the other one 0.5 -0.5 -1
     # thus one wants to actually only maximize the margin of the correct class an everything is 0.
-    # 
+    #
     # perfect loss happens when
     # y_pred = [<-0.5, <-0.6, >0.1]
-    # relu(margin - (x[y] - x[i])) 
-    # margin = dyi 
+    # relu(margin - (x[y] - x[i]))
+    # margin = dyi
     # Now I actually want margin to be dist to closest class or 0 if wrong label sign * yPred
     hinge = torch.relu(margin - sign * y_pred).sum(dim=-1)
     return reduce_loss(hinge, reduction=reduction)
@@ -56,8 +56,8 @@ class KRLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, y_true, y_pred):
-        return kr_loss(y_true, y_pred)
+    def forward(self, y_pred, y_true):
+        return kr_loss(y_pred, y_true)
 
 
 class HingeLoss(nn.Module):
@@ -65,8 +65,8 @@ class HingeLoss(nn.Module):
         super().__init__()
         self.margin = margin
 
-    def forward(self, y_true, y_pred):
-        return hinge_loss(y_true, y_pred, margin=self.margin)
+    def forward(self, y_pred, y_true):
+        return hinge_loss(y_pred, y_true, margin=self.margin)
 
 
 class HKRLoss(nn.Module):
@@ -75,21 +75,25 @@ class HKRLoss(nn.Module):
         self.margin = margin
         self.alpha = alpha
 
-    def forward(self, y_true, y_pred):
-        return self.alpha * kr_loss(y_true, y_pred) + (1 - self.alpha) * hinge_loss(y_true, y_pred, margin=self.margin)
+    def forward(self, y_pred, y_true):
+        return self.alpha * kr_loss(y_pred, y_true) + (1 - self.alpha) * hinge_loss(y_pred, y_true, margin=self.margin)
 
 
 class DynamicHingeLoss(nn.Module):
-    def __init__(self, margin=1.0, p=2, x=None, y_true=None, reduction='mean'):
+    def __init__(self, margin=1.0, p=2, x=None, y_true=None, reduction='mean', scale=False):
         super().__init__()
+        self.scale = scale
         self.margin = margin
         self.p = p
         self.reduction = reduction
         if x is not None and y_true is not None:
             self.margin += label_dist(x, y_true, p=self.p)/2
 
-    def forward(self, y_true, y_pred):
-        return hinge_loss(y_true, y_pred, margin=self.margin, reduction=self.reduction)
+    def forward(self, y_pred, y_true):
+        if self.scale:
+          y_true = y_true * 2 - 1
+          y_pred = y_pred * 2 - 1
+        return hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction)
 
 
 def reduce_loss(loss, reduction='mean'):

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Union
 
 
 def kr_loss(y_pred, y_true, reduction='mean'):
@@ -10,22 +11,11 @@ def kr_loss(y_pred, y_true, reduction='mean'):
     return reduce_loss(y_pred * sign, reduction=reduction)
 
 
-def hinge_loss(y_pred, y_true, margin=1.0, reduction='mean'):
+def hinge_loss(y_pred, y_true, margin: Union[float, torch.Tensor]=1.0, reduction='mean', scale=False):
     # assumes y_true is in {0, 1}^n
-    sign = 2 * y_true - 1
-    # suppose target = [0, 0, 1]
-    # then sign = [-1, -1, 1]
-    # suppose distances to classes are as follows:
-    # [0.5, 0.6, 0.1] -> margin
-    # [0.5, 0.5, 1] -> dist of x to each class -> margins preds should be -0.5 0.5 , -1 but can also get the other one 0.5 -0.5 -1
-    # thus one wants to actually only maximize the margin of the correct class an everything is 0.
-    #
-    # perfect loss happens when
-    # y_pred = [<-0.5, <-0.6, >0.1]
-    # relu(margin - (x[y] - x[i]))
-    # margin = dyi
-    # Now I actually want margin to be dist to closest class or 0 if wrong label sign * yPred
-    hinge = torch.relu(margin - sign * y_pred).sum(dim=-1)
+    if scale:
+      y_true = 2 * y_true - 1
+    hinge = torch.relu(margin - y_true * y_pred).sum(dim=-1)
     return reduce_loss(hinge, reduction=reduction)
 
 
@@ -48,8 +38,15 @@ def label_dist(x, y, p=2):
         for i in range(y.shape[1]):
             d.append(torch.amin(dist[row][y[:, i] == 1]).item())
         class_distances.append(d)
-    class_distances = torch.tensor(class_distances)
+    class_distances = torch.tensor(class_distances).to(x.device)
     return class_distances
+
+def get_class_sep(x, y, p=2):
+  y = y.squeeze()
+  d = torch.empty_like(y).float()
+  for yi in y.unique():
+    d[y == yi] = torch.cdist(x[y == yi], x[y != yi], p=p).amin(axis=1)
+  return d.view(-1, 1)
 
 
 class KRLoss(nn.Module):
@@ -61,39 +58,39 @@ class KRLoss(nn.Module):
 
 
 class HingeLoss(nn.Module):
-    def __init__(self, margin=1.0):
+    def __init__(self, margin=1.0, scale=False):
         super().__init__()
         self.margin = margin
+        self.scale = scale
 
     def forward(self, y_pred, y_true):
-        return hinge_loss(y_pred, y_true, margin=self.margin)
+        return hinge_loss(y_pred, y_true, margin=self.margin, scale=self.scale)
 
 
 class HKRLoss(nn.Module):
-    def __init__(self, margin=1.0, alpha=0.5):
+    def __init__(self, margin=1.0, alpha=0.5, scale=False):
         super().__init__()
         self.margin = margin
         self.alpha = alpha
+        self.scale = scale
 
     def forward(self, y_pred, y_true):
-        return self.alpha * kr_loss(y_pred, y_true) + (1 - self.alpha) * hinge_loss(y_pred, y_true, margin=self.margin)
+        return self.alpha * kr_loss(y_pred, y_true) + (1 - self.alpha) * hinge_loss(y_pred, y_true, margin=self.margin, scale=self.scale)
 
 
 class DynamicHingeLoss(nn.Module):
-    def __init__(self, margin=1.0, p=2, x=None, y_true=None, reduction='mean', scale=False):
+    def __init__(self, margin: Union[torch.Tensor, float]=1.0, p=2, x=None, y_true=None, reduction='mean', scale=False):
         super().__init__()
         self.scale = scale
-        self.margin = margin
+        margin = margin
         self.p = p
         self.reduction = reduction
         if x is not None and y_true is not None:
-            self.margin += label_dist(x, y_true, p=self.p)/2
+            margin += get_class_sep(x, y_true, p=self.p)/2
+        self.register_buffer("margin", margin)
 
     def forward(self, y_pred, y_true):
-        if self.scale:
-          y_true = y_true * 2 - 1
-          y_pred = y_pred * 2 - 1
-        return hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction)
+        return hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction, scale=self.scale)
 
 
 def reduce_loss(loss, reduction='mean'):

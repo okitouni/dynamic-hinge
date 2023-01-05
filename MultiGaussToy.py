@@ -4,6 +4,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import tqdm
 from matplotlib import pyplot as plt
 from monotonenorm import direct_norm, GroupSort
@@ -22,7 +23,9 @@ PLOT = True
 dist1 = torch.distributions.Normal(-1, 1)
 dist2 = torch.distributions.Normal(1, 1)
 
-X = torch.cat((dist1.sample((npoints//2, 1)), dist2.sample((npoints//2, 1)))).to(device)
+sample_shape = torch.Size([npoints//2, 1])
+
+X = torch.cat((dist1.sample(sample_shape), dist2.sample(sample_shape))).to(device)
 Y = torch.cat((torch.ones(npoints//2, 1), torch.zeros(npoints//2, 1))).to(device)
 
 X, argsort = X.sort(0)
@@ -44,7 +47,7 @@ class Multiply(nn.Module):
         return x * self.factor
 
 hidden_dim = 256
-multiplier = 1
+multiplier = 10
 
 norm = lambda x, *args, **kwargs: x
 # norm = direct_norm
@@ -61,13 +64,13 @@ model = nn.Sequential(
     GroupSort(hidden_dim//2),
     norm(nn.Linear(hidden_dim, 1), kind="inf"),
     Multiply(multiplier),
-    nn.Sigmoid(),
+    nn.Sigmoid()
 ).to(device)
 
 
-# criterion = nn.functional.binary_cross_entropy
-# criterion = DynamicHingeLoss(margin=1, x=X, y_true=Y, reduction='mean', scale=True)
-criterion = HingeLoss(margin=1)
+# criterion = F.binary_cross_entropy
+criterion = DynamicHingeLoss(margin=0, x=X, y_true=Y, reduction='mean', scale=True)
+# criterion = HingeLoss(margin=10, scale=True)
 
 lr = 1e-1 if norm == direct_norm else 1e-2
 lr *= 1/multiplier
@@ -90,6 +93,8 @@ if PLOT:
     X = X.cpu()
     Y = Y.cpu()
     model = model.cpu()
+    if hasattr(criterion, "cpu"):
+      criterion = criterion.cpu()
     xrange = X
     with torch.no_grad():
       yrange = model(xrange)

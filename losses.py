@@ -39,7 +39,7 @@ def label_dist(x, y, p=2):
             d.append(torch.amin(dist[row][y[:, i] == 1]).item())
         class_distances.append(d)
     class_distances = torch.tensor(class_distances).to(x.device)
-    return class_distances
+    return class_distances # TODO i think that one is wrong for binary
 
 def get_class_sep(x, y, p=2):
   y = y.squeeze()

@@ -13,10 +13,10 @@ from losses import DynamicHingeLoss, HingeLoss
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def accuracy(y_pred, y_true):
-    return ((y_pred > .5) == y_true).sum().item() / y_pred.shape[0]
+    return ((y_pred > y_pred.quantile(.5)) == y_true).sum().item() / y_pred.shape[0]
 
 torch.manual_seed(0)
-EPOCHS = 1000
+EPOCHS = 10000
 npoints = 5000
 PLOT = True
 
@@ -49,8 +49,8 @@ class Multiply(nn.Module):
 hidden_dim = 256
 multiplier = 10
 
-norm = lambda x, *args, **kwargs: x
-# norm = direct_norm
+# norm = lambda x, *args, **kwargs: x
+norm = direct_norm
 model = nn.Sequential(
     norm(nn.Linear(1, hidden_dim), kind="one-inf"),
     GroupSort(hidden_dim//2),
@@ -64,12 +64,12 @@ model = nn.Sequential(
     GroupSort(hidden_dim//2),
     norm(nn.Linear(hidden_dim, 1), kind="inf"),
     Multiply(multiplier),
-    nn.Sigmoid()
+#    nn.Sigmoid(),
 ).to(device)
 
 
 # criterion = F.binary_cross_entropy
-criterion = DynamicHingeLoss(margin=0, x=X, y_true=Y, reduction='mean', scale=True)
+criterion = DynamicHingeLoss(margin=.1, x=X, y_true=Y, reduction='mean', scale=True)
 # criterion = HingeLoss(margin=10, scale=True)
 
 lr = 1e-1 if norm == direct_norm else 1e-2
@@ -103,6 +103,9 @@ if PLOT:
       # Optimal bayes classifier
       llhood = llhood / (llhood + 1)
 
+      if hasattr(criterion, "scale") and criterion.scale:
+        yrange = (yrange + 1) / 2
+
       plt.scatter(X, Y)
       plt.plot(xrange, llhood, label="OptimalBayes",)
       plt.plot(xrange, yrange, label="NN")
@@ -112,5 +115,8 @@ if PLOT:
       loss_bayes = criterion(llhood, Y).item()
       loss_model = criterion(yrange, Y).item()
       print(f"Bayes acc: {acc_bayes:.3f}, NN acc: {acc_model:.3f}, Bayes loss: {loss_bayes:.3f}, NN loss: {loss_model:.3f}")
+      # cut value
+      cut = yrange.quantile(.5)
+      plt.plot(xrange, torch.ones_like(xrange) * cut, label="cut")
       plt.legend()
       plt.savefig("data.png")

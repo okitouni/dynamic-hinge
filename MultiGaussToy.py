@@ -1,7 +1,7 @@
 # Goal: Train a model to classify between two gaussians
 # Need to get a loss whose argmin is Optimal bayes classifier
 # when using a LipNN
-
+# %%
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,11 +13,13 @@ from losses import DynamicHingeLoss, HingeLoss
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def accuracy(y_pred, y_true):
-    return ((y_pred > y_pred.quantile(.5)) == y_true).sum().item() / y_pred.shape[0]
+    return ((y_pred>0.5).long() == y_true).sum().item() / y_pred.shape[0]
 
 torch.manual_seed(0)
 EPOCHS = 10000
 npoints = 5000
+EPOCHS = 10000
+npoints = 100
 PLOT = True
 
 dist1 = torch.distributions.Normal(-1, 1)
@@ -61,7 +63,7 @@ model = nn.Sequential(
     norm(nn.Linear(hidden_dim, hidden_dim), kind="inf"),
     GroupSort(hidden_dim//2),
     norm(nn.Linear(hidden_dim, hidden_dim), kind="inf"),
-    GroupSort(hidden_dim//2),
+    act,
     norm(nn.Linear(hidden_dim, 1), kind="inf"),
     Multiply(multiplier),
 #    nn.Sigmoid(),
@@ -77,6 +79,7 @@ lr *= 1/multiplier
 
 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=.9)
 
+# %%
 pbar = tqdm.tqdm(range(EPOCHS))
 for i in pbar:
     optimizer.zero_grad()
@@ -88,7 +91,7 @@ for i in pbar:
       acc = accuracy(y_pred, Y)
     pbar.set_description(f"Loss: {loss.item():.2f}, acc: {acc:.2f}")
 
-
+# %%
 if PLOT:
     X = X.cpu()
     Y = Y.cpu()

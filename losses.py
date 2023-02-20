@@ -90,7 +90,7 @@ class DynamicHingeLoss(nn.Module):
         self.register_buffer("margin", margin)
 
     def forward(self, y_pred, y_true):
-        return hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction, scale=self.scale)
+        return torch.exp(hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction, scale=self.scale))
 
 
 def reduce_loss(loss, reduction='mean'):

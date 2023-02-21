@@ -11,7 +11,7 @@ def kr_loss(y_pred, y_true, reduction='mean'):
     return reduce_loss(y_pred * sign, reduction=reduction)
 
 
-def hinge_loss(y_pred, y_true, margin: Union[float, torch.Tensor]=1.0, reduction='mean', scale=False):
+def hinge_loss(y_pred, y_true, margin: Union[float, torch.Tensor]=1.0, reduction='mean', scale=True):
     # assumes y_true is in {0, 1}^n
     if scale:
       y_true = 2 * y_true - 1
@@ -33,26 +33,27 @@ def label_dist(x, y, p=2):
     dist = torch.cdist(x, x, p=p)
     class_distances = []
     # could be made more efficient but this is fine for now
-    for row in range(y.shape[0]):
-        d = []
-        for i in range(y.shape[1]):
-            d.append(torch.amin(dist[row][y[:, i] == 1]).item())
-        class_distances.append(d)
-    class_distances = torch.tensor(class_distances).to(x.device)
-    return class_distances # TODO i think that one is wrong for binary
-
-def get_class_sep(x, y, p=2):
-  y = y.squeeze()
-  d = torch.empty_like(y).float()
-  for yi in y.unique():
-    d[y == yi] = torch.cdist(x[y == yi], x[y != yi], p=p).amin(axis=1)
-  return d.view(-1, 1)
+    if y.shape[1] > 1:
+        for row in range(y.shape[0]):
+            d = []
+            for i in range(y.shape[1]):
+                d.append(torch.amin(dist[row][y[:, i] == 1]).item())
+            class_distances.append(d)
+        class_distances = torch.tensor(class_distances)
+    else:
+        for row in range(y.shape[0]):
+            d = torch.amin(dist[row][y[:, 0] != y[row]]).item()
+            class_distances.append([d]  )
+    class_distances = torch.tensor(class_distances)
+    return class_distances
 
 
 class KRLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
+    def forward(self, y_pred, y_true):
+        return kr_loss(y_pred, y_true)
     def forward(self, y_pred, y_true):
         return kr_loss(y_pred, y_true)
 
@@ -64,7 +65,7 @@ class HingeLoss(nn.Module):
         self.scale = scale
 
     def forward(self, y_pred, y_true):
-        return hinge_loss(y_pred, y_true, margin=self.margin, scale=self.scale)
+        return hinge_loss(y_pred, y_true, margin=self.margin)
 
 
 class HKRLoss(nn.Module):
@@ -86,11 +87,21 @@ class DynamicHingeLoss(nn.Module):
         self.p = p
         self.reduction = reduction
         if x is not None and y_true is not None:
-            margin += get_class_sep(x, y_true, p=self.p)/2
-        self.register_buffer("margin", margin)
+            self.dynamic_margin = label_dist(x, y_true, p=self.p)/2
+        else:
+            self.dynamic_margin = None
 
     def forward(self, y_pred, y_true):
-        return torch.exp(hinge_loss(y_pred, y_true, margin=self.margin, reduction=self.reduction, scale=self.scale))
+        m = self.margin
+        if self.dynamic_margin is not None:
+            if y_pred.shape[0] != self.dynamic_margin.shape[0]:
+                # warn once during program execution
+                import warnings
+                warnings.warn('Dynamic margin has shape {} but y_pred has shape {}. '
+                                'Using static margin.'.format(self.dynamic_margin.shape, y_pred.shape))
+            else:
+                m += self.dynamic_margin
+        return hinge_loss(y_pred, y_true, margin=m, reduction=self.reduction)
 
 
 def reduce_loss(loss, reduction='mean'):

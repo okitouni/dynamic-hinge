@@ -83,7 +83,7 @@ class DynamicHingeLoss(nn.Module):
     def __init__(self, margin: Union[torch.Tensor, float]=1.0, p=2, x=None, y_true=None, reduction='mean', scale=False):
         super().__init__()
         self.scale = scale
-        margin = margin
+        self.margin = margin
         self.p = p
         self.reduction = reduction
         if x is not None and y_true is not None:
